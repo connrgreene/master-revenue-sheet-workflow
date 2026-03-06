@@ -1,0 +1,21 @@
+{
+  "name": "master-revenue-sheet-workflow",
+  "version": "1.0.0",
+  "description": "Listens to the Internal Network Ads Telegram group and auto-logs every ad to the Master Revenue Sheet and each page's individual revenue sheet.",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js",
+    "dev": "nodemon index.js"
+  },
+  "dependencies": {
+    "dotenv": "^16.4.5",
+    "googleapis": "^144.0.0",
+    "telegraf": "^4.16.3"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.4"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
