@@ -83,9 +83,11 @@ async function handleAdMessage(ctx) {
     if (MASTER_SHEET_ID && !PLACEHOLDER_PATTERN.test(MASTER_SHEET_ID)) {
       try {
         await appendRow(MASTER_SHEET_ID, TAB_NAME, row);
+        console.log(`[adHandler] ✅ Master sheet write succeeded (tab: "${TAB_NAME}")`);
         results.push("✅ Master sheet");
       } catch (err) {
-        console.error(`[adHandler] Master sheet write error: ${err.message}`);
+        console.error(`[adHandler] ❌ Master sheet write error: ${err.message}`);
+        console.error(err.stack);
         results.push("❌ Master sheet (error)");
       }
     } else {
