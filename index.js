@@ -21,11 +21,13 @@ bot.on("message", (ctx) => handleAdMessage(ctx));
 const WEBHOOK_URL = process.env.WEBHOOK_URL;
 const PORT        = parseInt(process.env.PORT || "3000");
 
+let server;
+
 if (WEBHOOK_URL) {
   const webhookPath    = "/webhook";
   const webhookFullUrl = `${WEBHOOK_URL}${webhookPath}`;
 
-  const server = http.createServer((req, res) => {
+  server = http.createServer((req, res) => {
     if (req.method === "POST" && req.url === webhookPath) {
       let body = "";
       req.on("data", (chunk) => (body += chunk));
@@ -65,5 +67,11 @@ if (WEBHOOK_URL) {
   );
 }
 
-process.once("SIGINT",  () => bot.stop("SIGINT"));
-process.once("SIGTERM", () => bot.stop("SIGTERM"));
+// In webhook mode bot.stop() throws "Bot is not running!" — just close the HTTP server gracefully
+process.once("SIGINT",  () => { try { server?.close(); } catch (e) {} process.exit(0); });
+process.once("SIGTERM", () => { try { server?.close(); } catch (e) {} process.exit(0); });
+
+// Catch unhandled promise rejections so they don't silently crash the process
+process.on("unhandledRejection", (reason) => {
+  console.error("[unhandledRejection]", reason);
+});
