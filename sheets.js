@@ -158,26 +158,33 @@ async function appendSeparatorRow(spreadsheetId, tabName) {
  * matches one of the given handles AND whose current Status is "Scheduled".
  * Returns the number of rows updated.
  */
-async function updateStatusToLive(spreadsheetId, tabName, pageHandles) {
+async function updateStatusToLive(spreadsheetId, tabName, pageHandles, clientName = null) {
   const auth   = getAuth();
   const client = await auth.getClient();
   const sheets = google.sheets({ version: "v4", auth: client });
 
-  // Read columns F (Page) and I (Status)
+  // Read B:I — gives us: B=0 (Client), C=1, D=2, E=3, F=4 (Page), G=5, H=6, I=7 (Status)
   const response = await sheets.spreadsheets.values.get({
     spreadsheetId,
-    range: `${tabName}!F:I`,
+    range: `${tabName}!B:I`,
   });
 
-  const rows    = response.data.values || [];
-  const updates = [];
+  const rows       = response.data.values || [];
+  const updates    = [];
   const normalised = pageHandles.map((h) => `@${h.toLowerCase().replace(/^@/, "")}`);
+  const normClient = clientName?.toLowerCase().trim() || null;
 
   for (let i = 0; i < rows.length; i++) {
-    const pageCell   = (rows[i]?.[0] || "").trim().toLowerCase();  // F
-    const statusCell = (rows[i]?.[3] || "").trim();                 // I (F=0,G=1,H=2,I=3)
+    const clientCell = (rows[i]?.[0] || "").trim().toLowerCase(); // B
+    const pageCell   = (rows[i]?.[4] || "").trim().toLowerCase(); // F
+    const statusCell = (rows[i]?.[7] || "").trim();               // I
 
-    if (normalised.includes(pageCell) && statusCell === "Scheduled") {
+    const pageMatches   = normalised.includes(pageCell);
+    const statusMatches = statusCell === "Scheduled";
+    // If we know the client name, require it to match — prevents cross-campaign false positives
+    const clientMatches = !normClient || clientCell === normClient;
+
+    if (pageMatches && statusMatches && clientMatches) {
       updates.push({
         range:  `${tabName}!I${i + 1}`,
         values: [["Live"]],

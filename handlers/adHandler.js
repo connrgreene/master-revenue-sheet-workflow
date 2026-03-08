@@ -73,10 +73,23 @@ async function handleAdMessage(ctx) {
         .map((l) => l.match(/^@([\w.]+)/)?.[1])
         .filter(Boolean);
 
+      // If this is a Telegram reply, parse the original ad to get the client name
+      // so we only flip rows for that specific campaign (not all Scheduled rows with matching pages)
+      let clientName = null;
+      const replyText = ctx.message?.reply_to_message?.text || ctx.message?.reply_to_message?.caption;
+      if (replyText) {
+        const originalParsed = parseAdMessage(replyText, new Date());
+        const first = Array.isArray(originalParsed) ? originalParsed[0] : originalParsed;
+        if (first?.client) {
+          clientName = first.client;
+          console.log(`[adHandler] "Posted on" linked to campaign: "${clientName}"`);
+        }
+      }
+
       if (handles.length > 0 && MASTER_SHEET_ID) {
         try {
-          const updated = await updateStatusToLive(MASTER_SHEET_ID, TAB_NAME, handles);
-          console.log(`[adHandler] ✅ "Posted on" — marked ${updated} row(s) as Live`);
+          const updated = await updateStatusToLive(MASTER_SHEET_ID, TAB_NAME, handles, clientName);
+          console.log(`[adHandler] ✅ "Posted on" — marked ${updated} row(s) as Live${clientName ? ` for "${clientName}"` : " (no campaign filter)"}`);
         } catch (err) {
           console.error(`[adHandler] ❌ "Posted on" update error: ${err.message}`);
         }
