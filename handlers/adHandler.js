@@ -44,6 +44,34 @@ const isPageEnabled = (handle) =>
 const PLACEHOLDER_PATTERN = /^(SHEET_ID_|TELEGRAM_CHAT_ID_)/;
 
 /**
+ * Build a row for an individual page's "IG Revenue Tracker" tab.
+ * Column structure (different from master sheet):
+ *
+ *  A: Client Name  — parsed client
+ *  B: Ad Type      — parsed category
+ *  C: Bulk #       — e.g. "11/15"
+ *  D: Date Posted  — e.g. "Mon 3/9/26"
+ *  E: Post Type    — Reels / Carousel / Story / Feed (from INSTRUCTIONS)
+ *  F: Post Duration — Permanent / 24hr / 1hr NIF etc. (from INSTRUCTIONS)
+ *  G: (blank)
+ *  H: Ad Price     — "$500"
+ *  I: Notes        — (blank — filled manually)
+ */
+function buildPageRow(parsed) {
+  return [
+    parsed.client        || "",  // A: Client Name
+    parsed.category      || "",  // B: Ad Type
+    parsed.bulkNum       || "",  // C: Bulk #
+    parsed.datePosted    || "",  // D: Date Posted
+    parsed.postType      || "",  // E: Post Type (Reels, Carousel, etc.)
+    parsed.nif           || "",  // F: Post Duration (Permanent, 24hr, etc.)
+    "",                          // G: blank
+    parsed.adPrice != null ? `$${parsed.adPrice}` : "", // H: Ad Price
+    "",                          // I: Notes
+  ];
+}
+
+/**
  * Build the row array matching the Master Revenue Sheet "2026 Ad Overview" tab:
  *
  *  A: Forwarded   — left blank (checkbox, VA ticks manually)
@@ -218,7 +246,7 @@ async function handleAdMessage(ctx) {
         continue;
       }
 
-      const row = buildRow(item);
+      const row = buildPageRow(item);
       try {
         await appendRow(sheetId, PAGE_TAB_NAME, row);
         pageSheetCount++;
