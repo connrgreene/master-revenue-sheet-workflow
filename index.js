@@ -9,8 +9,9 @@ if (process.env.CLEANUP_MODE === "true") {
 
 const http = require("http");
 const { Telegraf } = require("telegraf");
-const { handleAdMessage } = require("./handlers/adHandler");
-const { addMessage }       = require("./messageBuffer");
+const { handleAdMessage }   = require("./handlers/adHandler");
+const { handleAuditCommand } = require("./handlers/auditHandler");
+const { addMessage }         = require("./messageBuffer");
 
 // ── Validate required env vars ─────────────────────────────────────────────────
 const required = ["TELEGRAM_BOT_TOKEN", "TARGET_CHAT_ID", "MASTER_SHEET_ID"];
@@ -27,7 +28,8 @@ const bot = new Telegraf(process.env.TELEGRAM_BOT_TOKEN);
 // 2. Run the ad handler (ignores non-ads and non-target chats internally)
 bot.on("message", (ctx) => {
   if (ctx.message) addMessage(ctx.message);
-  handleAdMessage(ctx);
+  handleAuditCommand(ctx); // reply-based audit commands (price update / takedown / creative update)
+  handleAdMessage(ctx);    // new ad detection + sheet logging + forwarding
 });
 
 // ── Launch: webhook on Railway, polling locally ───────────────────────────────

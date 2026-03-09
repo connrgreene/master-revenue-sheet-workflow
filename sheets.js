@@ -202,4 +202,159 @@ async function updateStatusToLive(spreadsheetId, tabName, pageHandles, clientNam
   return updates.length;
 }
 
-module.exports = { appendRow, getLastDate, appendSeparatorRow, updateStatusToLive };
+/**
+ * Update the Ad Price for rows matching the given page handles + client name.
+ *
+ * Master sheet (isMasterSheet = true):
+ *   Read B:I — B=Client(0), F=Page(4), H=Price(6). Match client + page, update col H.
+ * Page sheet (isMasterSheet = false):
+ *   Read A:G — A=Client(0), G=Price(6). Match client only, update col G.
+ *
+ * Returns the number of cells updated.
+ */
+async function updateAdPrice(spreadsheetId, tabName, pageHandles, clientName, newPrice, isMasterSheet = true) {
+  const auth   = getAuth();
+  const client = await auth.getClient();
+  const sheets = google.sheets({ version: "v4", auth: client });
+
+  const normClient = clientName?.toLowerCase().trim() || null;
+
+  if (isMasterSheet) {
+    const response = await sheets.spreadsheets.values.get({
+      spreadsheetId,
+      range: `${tabName}!B:I`,
+    });
+    const rows       = response.data.values || [];
+    const normalised = pageHandles.map((h) => `@${h.toLowerCase().replace(/^@/, "")}`);
+    const updates    = [];
+
+    for (let i = 0; i < rows.length; i++) {
+      const clientCell = (rows[i]?.[0] || "").trim().toLowerCase(); // B
+      const pageCell   = (rows[i]?.[4] || "").trim().toLowerCase(); // F
+      const clientMatches = !normClient || clientCell === normClient;
+
+      if (normalised.includes(pageCell) && clientMatches) {
+        updates.push({ range: `${tabName}!H${i + 1}`, values: [[newPrice]] });
+      }
+    }
+
+    if (updates.length) {
+      await sheets.spreadsheets.values.batchUpdate({
+        spreadsheetId,
+        requestBody: { valueInputOption: "USER_ENTERED", data: updates },
+      });
+    }
+    return updates.length;
+
+  } else {
+    // Page sheet — no page column, match by client name only
+    const response = await sheets.spreadsheets.values.get({
+      spreadsheetId,
+      range: `${tabName}!A:G`,
+    });
+    const rows    = response.data.values || [];
+    const updates = [];
+
+    for (let i = 0; i < rows.length; i++) {
+      const clientCell    = (rows[i]?.[0] || "").trim().toLowerCase(); // A
+      const clientMatches = !normClient || clientCell === normClient;
+
+      if (clientMatches && clientCell) { // clientCell guard skips blank rows
+        updates.push({ range: `${tabName}!G${i + 1}`, values: [[newPrice]] });
+      }
+    }
+
+    if (updates.length) {
+      await sheets.spreadsheets.values.batchUpdate({
+        spreadsheetId,
+        requestBody: { valueInputOption: "USER_ENTERED", data: updates },
+      });
+    }
+    return updates.length;
+  }
+}
+
+/**
+ * Hard-delete rows matching the given page handles + client name.
+ *
+ * Master sheet (isMasterSheet = true):  match B=client + F=page.
+ * Page sheet  (isMasterSheet = false):  match A=client only.
+ *
+ * Rows are deleted bottom-to-top so indices don't shift mid-request.
+ * Returns the number of rows deleted.
+ */
+async function deleteAdRows(spreadsheetId, tabName, pageHandles, clientName, isMasterSheet = true) {
+  const auth   = getAuth();
+  const client = await auth.getClient();
+  const sheets = google.sheets({ version: "v4", auth: client });
+
+  // Resolve numeric sheetId for the tab (required by deleteDimension)
+  const spreadsheet = await sheets.spreadsheets.get({ spreadsheetId });
+  const sheet = spreadsheet.data.sheets?.find((s) => s.properties.title === tabName);
+  if (!sheet) throw new Error(`Tab "${tabName}" not found in spreadsheet ${spreadsheetId}`);
+  const sheetId = sheet.properties.sheetId;
+
+  const normClient = clientName?.toLowerCase().trim() || null;
+  let rowsToDelete = []; // 0-indexed row indices in the sheet
+
+  if (isMasterSheet) {
+    const response = await sheets.spreadsheets.values.get({
+      spreadsheetId,
+      range: `${tabName}!B:I`,
+    });
+    const rows       = response.data.values || [];
+    const normalised = pageHandles.map((h) => `@${h.toLowerCase().replace(/^@/, "")}`);
+
+    for (let i = 0; i < rows.length; i++) {
+      const clientCell = (rows[i]?.[0] || "").trim().toLowerCase(); // B
+      const pageCell   = (rows[i]?.[4] || "").trim().toLowerCase(); // F
+      const clientMatches = !normClient || clientCell === normClient;
+
+      if (normalised.includes(pageCell) && clientMatches) {
+        rowsToDelete.push(i); // 0-indexed
+      }
+    }
+
+  } else {
+    // Page sheet — match client only
+    const response = await sheets.spreadsheets.values.get({
+      spreadsheetId,
+      range: `${tabName}!A:A`,
+    });
+    const rows = response.data.values || [];
+
+    for (let i = 0; i < rows.length; i++) {
+      const clientCell    = (rows[i]?.[0] || "").trim().toLowerCase();
+      const clientMatches = !normClient || clientCell === normClient;
+
+      if (clientMatches && clientCell) {
+        rowsToDelete.push(i);
+      }
+    }
+  }
+
+  if (rowsToDelete.length === 0) return 0;
+
+  // Delete bottom-to-top so earlier indices don't shift
+  rowsToDelete.sort((a, b) => b - a);
+
+  const requests = rowsToDelete.map((rowIdx) => ({
+    deleteDimension: {
+      range: {
+        sheetId,
+        dimension:  "ROWS",
+        startIndex: rowIdx,
+        endIndex:   rowIdx + 1,
+      },
+    },
+  }));
+
+  await sheets.spreadsheets.batchUpdate({
+    spreadsheetId,
+    requestBody: { requests },
+  });
+
+  return rowsToDelete.length;
+}
+
+module.exports = { appendRow, getLastDate, appendSeparatorRow, updateStatusToLive, updateAdPrice, deleteAdRows };
