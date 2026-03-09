@@ -1,7 +1,7 @@
 {
   "_comment": "Maps Instagram page @handles (lowercase, no @) to their individual Google Sheets revenue sheet IDs. Add new pages here as they come on board. The sheet must have a tab named 'IG Revenue Tracker' (or whatever SHEET_TAB_NAME is set to).",
 
-  "thefuck.tv":                    "SHEET_ID_THEFUCKTV",
+  "thefuck.tv":                    "1H_CKfwTj7fDBvsb_PRyOZ8MjFFxwS1ANy33TT2qO-hI",
   "bitchy.tweets":                 "SHEET_ID_BITCHYTWEETS",
   "marvelmovies":                  "SHEET_ID_MARVELMOVIES",
   "scooby":                        "SHEET_ID_SCOOBY",
