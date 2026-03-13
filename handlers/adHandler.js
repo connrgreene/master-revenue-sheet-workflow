@@ -17,7 +17,11 @@ const { getPrecedingMessages, getContentBundlesByPage, getCollabBundlesByPage, M
 const pages                    = require("../config/pages.json");
 const destinations             = require("../config/telegram-destinations.json");
 
-const TARGET_CHAT_ID  = process.env.TARGET_CHAT_ID;
+// Supports comma-separated chat IDs so a test group can run alongside production.
+// e.g. TARGET_CHAT_ID=-1001111111111,-1002222222222
+const TARGET_CHAT_IDS = new Set(
+  (process.env.TARGET_CHAT_ID || "").split(",").map((id) => id.trim()).filter(Boolean)
+);
 const MASTER_SHEET_ID = process.env.MASTER_SHEET_ID;
 const TAB_NAME        = process.env.SHEET_TAB_NAME      || "2026 Ad Overview";
 const PAGE_TAB_NAME   = process.env.PAGE_SHEET_TAB_NAME || "IG Revenue Tracker";
@@ -143,8 +147,8 @@ async function handleAdMessage(ctx) {
   try {
     const chatId = String(ctx.chat?.id);
 
-    // Only process messages from the target group
-    if (TARGET_CHAT_ID && chatId !== String(TARGET_CHAT_ID)) return;
+    // Only process messages from allowed groups (production + any test groups)
+    if (TARGET_CHAT_IDS.size > 0 && !TARGET_CHAT_IDS.has(chatId)) return;
 
     const text = ctx.message?.text || ctx.message?.caption;
     if (!text) return;
