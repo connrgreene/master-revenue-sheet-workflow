@@ -156,6 +156,7 @@ function parseAdMessage(text, date) {
   // ── Format date (matches sheet "Thu 1/1/26" style) ───────────────────────────
   const d = date || new Date();
   const datePosted = d.toLocaleDateString("en-US", {
+    timeZone: "America/Phoenix", // AZ time — Railway runs UTC, ads are scheduled in AZ
     weekday: "short",
     month:   "numeric",
     day:     "numeric",

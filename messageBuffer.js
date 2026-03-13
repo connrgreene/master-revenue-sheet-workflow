@@ -208,4 +208,4 @@ function getCollabBundlesByPage(chatId, adMessageId) {
   return result;
 }
 
-module.exports = { addMessage, getPrecedingMessages, getContentBundlesByPage, getCollabBundlesByPage };
+module.exports = { addMessage, getPrecedingMessages, getContentBundlesByPage, getCollabBundlesByPage, MAX_BUFFER_PER_CHAT };

@@ -13,7 +13,7 @@
 
 const { parseAdMessage }       = require("../parser");
 const { appendRow, updateStatusToLive } = require("../sheets");
-const { getPrecedingMessages, getContentBundlesByPage, getCollabBundlesByPage } = require("../messageBuffer");
+const { getPrecedingMessages, getContentBundlesByPage, getCollabBundlesByPage, MAX_BUFFER_PER_CHAT } = require("../messageBuffer");
 const pages                    = require("../config/pages.json");
 const destinations             = require("../config/telegram-destinations.json");
 
@@ -274,7 +274,9 @@ async function handleAdMessage(ctx) {
           `[adHandler] 📤 Collab format — ${collabBundles.size} page(s) mapped from Host/invite messages`
         );
       } else {
-        fallbackMsgs = getPrecedingMessages(sourceChatId, adMessageId, CONTENT_MESSAGES_TO_FORWARD);
+        // Standard fallback: grab the full buffer so nothing is missed even if
+        // the sales team breaks format (misused ^ labels, extra plain-text messages, etc.)
+        fallbackMsgs = getPrecedingMessages(sourceChatId, adMessageId, MAX_BUFFER_PER_CHAT);
         console.log(`[adHandler] 📤 Standard format — forwarding ${fallbackMsgs.length} shared message(s) to all pages`);
       }
 
