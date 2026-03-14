@@ -77,7 +77,7 @@ function freshSession(chatId) {
       collabGroupIdx:   0,         // which group is being built
       collabBuildPhase: "host",    // "host" | "invites" | "more"
 
-      // Collab phase 2 — collect a video per group
+      // Collab phase 2 — collect media (video or images) per group
       collabVideoIdx: 0,
     },
   };
@@ -266,19 +266,19 @@ function renderContentStep(session) {
       }
     }
 
-    // Phase 2: upload a video per group
+    // Phase 2: upload media (video or images) per group
     if (content.collabPhase === "videos") {
       const gIdx  = content.collabVideoIdx;
       if (gIdx >= content.collabGroups.length) { session.step = "preview"; return renderMsg(session); }
       const g      = content.collabGroups[gIdx];
-      const hasVid = !!g.video;
+      const n      = g.media.length;
       const isLast = gIdx === content.collabGroups.length - 1;
       return {
         text: `📋 *New Ad Brief*\n\n${sum}\n\n` +
-              `📎  *Video for Group ${gIdx + 1}*  (${gIdx + 1} / ${content.collabGroups.length})\n` +
+              `📎  *Content for Group ${gIdx + 1}*  (${gIdx + 1} / ${content.collabGroups.length})\n` +
               `Host: @${g.host}  ·  ${g.invites.map((h) => `@${h}`).join(" ")}\n` +
-              `${hasVid ? "✅  Video received" : "_Send the video below ↓_"}`,
-        keyboard: hasVid
+              `${n > 0 ? `✅  ${n} file(s) received` : "_Send video or images below ↓_"}`,
+        keyboard: n > 0
           ? Markup.inlineKeyboard([[b(isLast ? "✅  Done" : "➡️  Next group", "clb:nextVideo")]])
           : null,
       };
@@ -374,9 +374,9 @@ async function postToGroup(telegram, session) {
     await telegram.sendMessage(TARGET_CHAT, buildBrief(answers));
 
   } else if (fmt === "Collab") {
-    // For each group: copy video → send "Host: @X, invite: @A @B" → then brief
+    // For each group: copy all media (video or images) → send "Host: @X, invite: @A @B" → then brief
     for (const g of content.collabGroups) {
-      if (g.video) await copy(g.video);
+      for (const ref of g.media) await copy(ref);
       const invites = g.invites.map((h) => `@${h}`).join("\n");
       await telegram.sendMessage(TARGET_CHAT, `Host: @${g.host}, invite:\n\n${invites}`);
     }
@@ -563,7 +563,7 @@ bot.on("text", async (ctx) => {
     if (content.collabPhase === "groups") {
       if (content.collabBuildPhase === "host") {
         const host = input.replace(/^@/, "").toLowerCase();
-        content.collabGroups[content.collabGroupIdx] = { host, invites: [], video: null };
+        content.collabGroups[content.collabGroupIdx] = { host, invites: [], media: [] };
         content.collabBuildPhase = "invites";
         await updateWizard(ctx.telegram, session);
         return;
@@ -626,8 +626,8 @@ bot.on(["photo", "video", "document", "animation"], async (ctx) => {
 
   } else if (fmt === "Collab" && content.collabPhase === "videos") {
     const g = content.collabGroups[content.collabVideoIdx];
-    // Only accept the first file per group (one video per collab group)
-    if (g && !g.video) g.video = msgRef;
+    // Accept multiple files per group (video or images)
+    if (g) g.media.push(msgRef);
   }
 
   // Update the wizard message to show updated file count
