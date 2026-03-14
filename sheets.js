@@ -84,7 +84,12 @@ async function appendRow(spreadsheetId, tabName, rowValues) {
 
 /**
  * Tick the "Forwarded" checkbox (column A) for the given 1-indexed row
- * in the master sheet. Column A is a checkbox — writing TRUE checks it.
+ * in the master sheet.
+ *
+ * Uses batchUpdate (updateCells) instead of values.update so that the cell
+ * gets both the checkbox data-validation AND the boolean value true in one
+ * request. This works even when the appended row didn't inherit checkbox
+ * formatting from the column above it.
  */
 async function markForwarded(spreadsheetId, tabName, rowNumber) {
   if (!rowNumber) return;
@@ -92,11 +97,41 @@ async function markForwarded(spreadsheetId, tabName, rowNumber) {
   const client = await auth.getClient();
   const sheets = google.sheets({ version: "v4", auth: client });
 
-  await sheets.spreadsheets.values.update({
+  // Resolve the numeric sheetId for the named tab
+  const meta  = await sheets.spreadsheets.get({ spreadsheetId });
+  const sheet = meta.data.sheets?.find((s) => s.properties.title === tabName);
+  if (!sheet) {
+    console.warn(`[sheets] markForwarded: tab "${tabName}" not found`);
+    return;
+  }
+  const sheetId = sheet.properties.sheetId;
+  const rowIdx  = rowNumber - 1; // 0-indexed
+
+  await sheets.spreadsheets.batchUpdate({
     spreadsheetId,
-    range:           `${tabName}!A${rowNumber}`,
-    valueInputOption: "USER_ENTERED",
-    requestBody:     { values: [["TRUE"]] },
+    requestBody: {
+      requests: [{
+        updateCells: {
+          range: {
+            sheetId,
+            startRowIndex:    rowIdx,
+            endRowIndex:      rowIdx + 1,
+            startColumnIndex: 0,
+            endColumnIndex:   1,
+          },
+          rows: [{
+            values: [{
+              userEnteredValue: { boolValue: true },
+              dataValidation: {
+                condition: { type: "BOOLEAN" },
+                showCustomUi: true, // renders as a real checkbox
+              },
+            }],
+          }],
+          fields: "userEnteredValue,dataValidation",
+        },
+      }],
+    },
   });
 }
 
