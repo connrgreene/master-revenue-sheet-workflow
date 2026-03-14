@@ -307,10 +307,10 @@ async function handleAdMessage(ctx) {
           `[adHandler] 📤 Collab format — ${collabBundles.size} page(s) mapped from Host/invite messages`
         );
       } else {
-        // Standard fallback: grab the full buffer so nothing is missed even if
-        // the sales team breaks format (misused ^ labels, extra plain-text messages, etc.)
-        fallbackMsgs = getPrecedingMessages(sourceChatId, adMessageId, MAX_BUFFER_PER_CHAT);
-        console.log(`[adHandler] 📤 Standard format — forwarding ${fallbackMsgs.length} shared message(s) to all pages`);
+        // Standard format — no labeled bundles, no collab.
+        // Send brief only (no preceding content) to avoid forwarding stale
+        // buffer messages (reminders, chat noise, etc.) to page groups.
+        console.log(`[adHandler] 📤 Standard format — brief only, no preceding content`);
       }
 
       // Only forward for pages that are enabled AND have a configured destination
@@ -362,8 +362,8 @@ async function handleAdMessage(ctx) {
           }
 
         } else {
-          // Format 3 — standard (shared content forwarded to all pages)
-          contentMsgs = fallbackMsgs;
+          // Format 3 — standard (brief only, no preceding content)
+          contentMsgs = [];
         }
 
         try {
