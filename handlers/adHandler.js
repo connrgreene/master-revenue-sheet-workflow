@@ -165,11 +165,13 @@ async function handleAdMessage(ctx) {
 
       // If this is a Telegram reply, parse the original ad to get the client name
       // so we only flip rows for that specific campaign (not all Scheduled rows with matching pages)
-      let clientName = null;
+      let clientName  = null;
+      let originalList = [];
       const replyText = ctx.message?.reply_to_message?.text || ctx.message?.reply_to_message?.caption;
       if (replyText) {
         const originalParsed = parseAdMessage(replyText, new Date());
-        const first = Array.isArray(originalParsed) ? originalParsed[0] : originalParsed;
+        originalList = Array.isArray(originalParsed) ? originalParsed : (originalParsed ? [originalParsed] : []);
+        const first = originalList[0];
         if (first?.client) {
           clientName = first.client;
           console.log(`[adHandler] "Posted on" linked to campaign: "${clientName}"`);
@@ -184,6 +186,27 @@ async function handleAdMessage(ctx) {
           console.error(`[adHandler] ❌ "Posted on" update error: ${err.message}`);
         }
       }
+
+      // ── NIF reminders start NOW (when the post actually went live) ────────────
+      // The NIF window begins at post time, not at brief-forwarding time.
+      for (const handle of handles) {
+        const item   = originalList.find((p) => p.pageHandle === handle) || originalList[0];
+        const nifMs  = parseNifMs(item?.nif);
+        if (!nifMs) continue;
+
+        const destChatId = destinations[handle];
+        if (!destChatId || PLACEHOLDER_PATTERN.test(String(destChatId))) continue;
+
+        scheduleNifReminder(
+          ctx.telegram,
+          String(destChatId),
+          item?.client || clientName || handle,
+          handle,
+          nifMs
+        );
+        console.log(`[adHandler] ⏰ NIF reminder scheduled for @${handle} in ${nifMs / 60000}min`);
+      }
+
       return;
     }
 
@@ -362,14 +385,10 @@ async function handleAdMessage(ctx) {
             );
           }
 
-          // ── NIF expiration reminder (in-process setTimeout) ──────────────────
-          const item    = parsedList.find((p) => p.pageHandle === handle);
-          const nifMs   = parseNifMs(item?.nif);
-          if (nifMs) {
-            scheduleNifReminder(ctx.telegram, String(destChatId), item.client, handle, nifMs);
-          }
-
           // ── Post expiry / analytics reminder (persisted to Reminders sheet) ──
+          // NIF reminder is scheduled separately from the "Posted on" handler
+          // so it starts when the post actually goes live, not at brief-forwarding time.
+          const item = parsedList.find((p) => p.pageHandle === handle);
           if (MASTER_SHEET_ID && item) {
             const postDur = parsePostDuration(item.nif);
             if (postDur) {
