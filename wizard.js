@@ -39,6 +39,32 @@ try { KNOWN_CLIENTS = require("./config/clients.json"); } catch (_) {}
 
 const bot = new Telegraf(WIZARD_TOKEN);
 
+// ── AZ time slot generator ────────────────────────────────────────────────────
+// Returns the next 24 slots (12 hours) in 30-min increments, always in the
+// future relative to the current AZ time. Slots are labelled "8:00 PM AZ".
+
+function getAZTimeSlots() {
+  const now = new Date();
+
+  // Round up to the next 30-min boundary in AZ time
+  const THIRTY_MIN = 30 * 60 * 1000;
+  const azNowMs = now.getTime();
+  const nextSlotMs = Math.ceil(azNowMs / THIRTY_MIN) * THIRTY_MIN;
+
+  const slots = [];
+  for (let i = 0; i < 24; i++) {
+    const slotTime = new Date(nextSlotMs + i * THIRTY_MIN);
+    const label = new Intl.DateTimeFormat("en-US", {
+      timeZone: "America/Phoenix",
+      hour:     "numeric",
+      minute:   "2-digit",
+      hour12:   true,
+    }).format(slotTime) + " AZ";
+    slots.push(label);
+  }
+  return slots;
+}
+
 // ── Session ───────────────────────────────────────────────────────────────────
 
 const sessions = new Map(); // Map<userId, Session>
@@ -162,6 +188,19 @@ function buildKeyboard(step) {
         [b("No NIF", "f:nif:none"), b("15min", "f:nif:15min NIF"), b("30min", "f:nif:30min NIF")],
         [b("1hr", "f:nif:1hr NIF"), b("2hr", "f:nif:2hr NIF"), b("✏️  Custom", "c:nif")],
       ]);
+    case "time": {
+      // Generated fresh each time so every slot is always in the future
+      const slots = getAZTimeSlots();
+      const rows  = [];
+      for (let i = 0; i < slots.length; i += 3) {
+        const row = [b(slots[i], `f:time:${slots[i]}`)];
+        if (slots[i + 1]) row.push(b(slots[i + 1], `f:time:${slots[i + 1]}`));
+        if (slots[i + 2]) row.push(b(slots[i + 2], `f:time:${slots[i + 2]}`));
+        rows.push(row);
+      }
+      rows.push([b("✏️  Custom time", "c:time")]);
+      return Markup.inlineKeyboard(rows);
+    }
     case "format":
       return Markup.inlineKeyboard([
         [b("Standard", "f:format:Standard"), b("Per-creative", "f:format:Per-creative"), b("Collab", "f:format:Collab")],
@@ -182,7 +221,7 @@ const QUESTIONS = {
   postType: "🎬  *Post type?*",
   duration: "⏳  *Post duration?*",
   nif:      "⏰  *NIF?*",
-  time:     "🕐  *Scheduled time?*\n_e.g. 8pm AZ / 11pm EST · Type below ↓_",
+  time:     "🕐  *Scheduled time?*\n_Next 12 hrs shown below — or tap Custom for anything further out_",
   pages:    "📄  *Which pages?*\n_Type @handles below ↓_",
   format:   "📐  *Content format?*",
 };
@@ -309,6 +348,7 @@ function renderMsg(session) {
     const prompt =
       awaitingCustom === "client" ? "👤  *New client name?*\n_Type below ↓_" :
       awaitingCustom === "price"  ? "💰  *Custom price?*\n_Numbers only, e.g. 1500 · Type below ↓_" :
+      awaitingCustom === "time"   ? "🕐  *Custom time?*\n_e.g. Tomorrow 10am AZ · Type below ↓_" :
                                     "⏰  *Custom NIF?*\n_e.g. 45min NIF · Type below ↓_";
     return {
       text:     `📋 *New Ad Brief*\n\n${renderSummary(answers)}\n\n${prompt}`,
@@ -522,6 +562,7 @@ bot.on("callback_query", async (ctx) => {
     if (field === "postType") a.postType = value;
     if (field === "duration") a.duration = value;
     if (field === "nif")      a.nif      = value;
+    if (field === "time")     a.time     = value;
     if (field === "format")   a.format   = value;
 
     session.step          = nextStep(field);
@@ -548,6 +589,8 @@ bot.on("text", async (ctx) => {
       session.answers.price = isNaN(n) ? input : String(n);
     } else if (field === "nif") {
       session.answers.nif = input;
+    } else if (field === "time") {
+      session.answers.time = input;
     } else if (field === "client") {
       session.answers.client = input;
     }
@@ -589,9 +632,6 @@ bot.on("text", async (ctx) => {
     // Only reached if KNOWN_CLIENTS is empty (no button grid)
     answers.client = input;
     session.step   = nextStep("client");
-  } else if (step === "time") {
-    answers.time   = input;
-    session.step   = nextStep("time");
   } else if (step === "pages") {
     answers.pages = [...input.matchAll(/@?([\w.]+)/g)]
       .map((m) => m[1].toLowerCase())
