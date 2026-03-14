@@ -25,14 +25,14 @@ const { Telegraf, Markup } = require("telegraf");
 // ── Config ────────────────────────────────────────────────────────────────────
 
 const WIZARD_TOKEN  = process.env.WIZARD_BOT_TOKEN;
-const TARGET_CHAT   = process.env.TARGET_CHAT_ID?.split(",")[0]; // prod group only
+const TARGET_CHAT   = process.env.WIZARD_TARGET_CHAT_ID;
 
 // Admin handles shown at the top of every brief (before @sales_bolismedia)
 const ADMIN_HANDLES = (process.env.WIZARD_ADMIN_HANDLES || "")
   .split(",").map((h) => h.trim().replace(/^@/, "")).filter(Boolean);
 
-if (!WIZARD_TOKEN)  { console.error("❌  WIZARD_BOT_TOKEN not set"); process.exit(1); }
-if (!TARGET_CHAT)   { console.error("❌  TARGET_CHAT_ID not set");   process.exit(1); }
+if (!WIZARD_TOKEN)  { console.error("❌  WIZARD_BOT_TOKEN not set");        process.exit(1); }
+if (!TARGET_CHAT)   { console.error("❌  WIZARD_TARGET_CHAT_ID not set");   process.exit(1); }
 
 const bot = new Telegraf(WIZARD_TOKEN);
 
