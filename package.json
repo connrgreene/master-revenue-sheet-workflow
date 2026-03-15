@@ -10,6 +10,8 @@
     "dev:wizard": "nodemon wizard.js"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.78.0",
+    "@supabase/supabase-js": "^2.99.1",
     "dotenv": "^16.4.5",
     "googleapis": "^144.0.0",
     "node-cron": "^4.2.1",

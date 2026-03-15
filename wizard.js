@@ -19,6 +19,7 @@ require("dotenv").config();
 const fs              = require("fs");
 const path            = require("path");
 const { Telegraf, Markup } = require("telegraf");
+const brain           = require("./brain");
 
 // ── Config ────────────────────────────────────────────────────────────────────
 
@@ -1235,6 +1236,67 @@ bot.on(["photo", "video", "document", "animation"], async (ctx) => {
 
   await updateWizard(ctx.telegram, session);
 });
+
+// ── /pipeline — AI-powered pipeline summary ───────────────────────────────────
+
+bot.command("pipeline", async (ctx) => {
+  const msg = await ctx.reply("🔍 Pulling pipeline...", { parse_mode: "Markdown" });
+  const summary = await brain.getPipelineSummary();
+  await ctx.telegram.editMessageText(
+    ctx.chat.id, msg.message_id, undefined,
+    `📊 *Pipeline Summary*\n\n${summary}`,
+    { parse_mode: "Markdown" }
+  );
+});
+
+// ── /deal [client] — advice on a specific deal ────────────────────────────────
+
+bot.command("deal", async (ctx) => {
+  const clientName = ctx.message.text.replace(/^\/deal\s*/i, "").trim();
+  if (!clientName) {
+    return ctx.reply("Usage: /deal [client name]");
+  }
+  const msg = await ctx.reply(`🔍 Analyzing deal for "${clientName}"...`);
+  const advice = await brain.getDealAdvice(clientName);
+  await ctx.telegram.editMessageText(
+    ctx.chat.id, msg.message_id, undefined,
+    advice, { parse_mode: "Markdown" }
+  );
+});
+
+// ── /watchsales — register this chat for sales monitoring ────────────────────
+
+bot.command("watchsales", async (ctx) => {
+  await brain.registerChat(ctx.chat.id, ctx.chat.title || ctx.chat.username || String(ctx.chat.id));
+  await ctx.reply("👁️ Greg is now watching this chat for sales signals.");
+});
+
+// ── Passive sales listener — auto-capture sales-relevant messages ─────────────
+// Runs on every non-command text in monitored chats (non-blocking).
+
+bot.on("text", async (ctx) => {
+  if (ctx.message.text.startsWith("/")) return;
+
+  // Check if this chat is monitored (non-blocking — don't await wizard logic)
+  brain.isMonitoredChat(ctx.chat.id).then((monitored) => {
+    if (!monitored) return;
+    const handle = ctx.from.username || String(ctx.from.id);
+    brain.captureMessage(
+      ctx.chat.id,
+      ctx.message.message_id,
+      handle,
+      ctx.message.text
+    ).catch((e) => console.error("[wizard] brain.captureMessage error:", e.message));
+  }).catch(() => {});
+});
+
+// ── Nightly lesson extraction (runs once a day) ───────────────────────────────
+
+const TWENTY_FOUR_HOURS = 24 * 60 * 60 * 1000;
+setInterval(() => {
+  brain.extractNightlyLessons()
+    .catch((e) => console.error("[wizard] nightly lessons error:", e.message));
+}, TWENTY_FOUR_HOURS);
 
 // ── Launch ────────────────────────────────────────────────────────────────────
 
