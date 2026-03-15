@@ -77,6 +77,7 @@ function freshSession(chatId, mode = "brief") {
     // template-creation extras (mode === "template" only)
     _bulkName:      null,
     _bulkRefPrefix: null,
+    _bulkStartNum:  0,    // last completed run # (next run = this + 1)
 
     answers: {
       client:      null,
@@ -122,7 +123,7 @@ const STEPS = [
 
 // Template creation: skip campaignRef (replaced by bulkRefPrefix), time, caption, content.
 const TEMPLATE_STEPS = [
-  "bulkName", "bulkRefPrefix", "client", "adType", "price",
+  "bulkName", "bulkRefPrefix", "bulkStartNum", "client", "adType", "price",
   "postType", "duration", "nif", "pages", "format", "preview",
 ];
 
@@ -188,7 +189,18 @@ function buildKeyboard(step, session) {
       return null; // text input only
 
     case "bulkRefPrefix":
-      return Markup.inlineKeyboard([[b("⏭️  No ref prefix", "a:skipBulkRefPrefix")]]);
+      return Markup.inlineKeyboard([
+        [b("⏭️  No ref prefix", "a:skipBulkRefPrefix")],
+        [b("← Back", "a:back")],
+      ]);
+
+    case "bulkStartNum":
+      return Markup.inlineKeyboard([
+        [b("Start fresh  (next = #1)", "bsn:0")],
+        [b("5",  "bsn:5"),  b("10", "bsn:10"), b("13", "bsn:13")],
+        [b("14", "bsn:14"), b("15", "bsn:15"), b("✏️  Custom", "c:bulkStartNum")],
+        [b("← Back", "a:back")],
+      ]);
 
     case "client": {
       if (!KNOWN_CLIENTS.length) return null;
@@ -280,6 +292,7 @@ function buildKeyboard(step, session) {
 const QUESTIONS = {
   bulkName:      "📦  *Bulk template name?*\n_e.g. Stake Bet Slips · Type below ↓_",
   bulkRefPrefix: "🏷️  *Campaign ref prefix?* _(optional)_\n_e.g. BET SLIP Day → Greg will append 1, 2, 3… each run · Type below ↓_",
+  bulkStartNum:  "🔢  *Where are we in this bulk right now?*\n_Pick the last completed run # — next run will be one higher_",
   client:        KNOWN_CLIENTS.length ? "👤  *Client?*" : "👤  *Client name?*\n_Type below ↓_",
   campaignRef:   "🏷️  *Campaign reference?* _(optional)_\n_e.g. Bounty Post \\#147 · BET SLIP Day 4 · Type below ↓_",
   adType:        "📂  *Ad type?*",
@@ -456,14 +469,24 @@ function renderMsg(session) {
       keyboard: buildKeyboard("bulkRefPrefix", session),
     };
   }
+  if (step === "bulkStartNum") {
+    const prefix = session._bulkRefPrefix ? `*${session._bulkRefPrefix}*` : "this bulk";
+    const nextNum = (session._bulkStartNum || 0) + 1;
+    return {
+      text:     `${heading}\n\n🔢  *Where are we in ${prefix} right now?*\n_Pick the last completed # — next run will be *#${nextNum}*_`,
+      keyboard: buildKeyboard("bulkStartNum", session),
+    };
+  }
 
   if (step === "preview") {
     if (isTemplate) {
-      const refExample = session._bulkRefPrefix
-        ? `${session._bulkRefPrefix} 1, ${session._bulkRefPrefix} 2, …`
-        : "no ref";
+      const startNum = session._bulkStartNum || 0;
+      const nextNum  = startNum + 1;
+      const refLine  = session._bulkRefPrefix
+        ? `Ref: ${session._bulkRefPrefix} ${nextNum}, ${nextNum + 1}, …`
+        : `Run counter starts at #${nextNum}`;
       return {
-        text:     `${heading}\n\n*${session._bulkName || "Unnamed"}*\nRef: ${refExample}\n\n${renderSummary(answers)}`,
+        text:     `${heading}\n\n*${session._bulkName || "Unnamed"}*\n${refLine}\n\n${renderSummary(answers)}`,
         keyboard: buildKeyboard("preview", session),
       };
     }
@@ -486,10 +509,11 @@ function renderMsg(session) {
       duration:  "⏳  *Custom duration?*\n_e.g. 7 days · Type below ↓_",
       nif:       "⏰  *Custom NIF?*\n_e.g. 45min NIF · Type below ↓_",
       time:      "🕐  *Custom time?*\n_e.g. Tomorrow 10am AZ · Type below ↓_",
-      pageprice: (() => {
+      pageprice:    (() => {
         const h = answers.pages[answers.pagePriceIdx];
         return `💰  *Custom price for @${h}?*\n_Numbers only · Type below ↓_`;
       })(),
+      bulkStartNum: "🔢  *Last completed run #?*\n_e.g. 13 means next run will be #14 · Type below ↓_",
     };
     return {
       text:     `${heading}\n\n${renderSummary(answers)}\n\n${prompts[awaitingCustom] || "Type below ↓"}`,
@@ -723,7 +747,7 @@ bot.on("callback_query", async (ctx) => {
         id,
         name:        session._bulkName || "Unnamed",
         refPrefix:   session._bulkRefPrefix || null,
-        lastRefNum:  0,
+        lastRefNum:  session._bulkStartNum || 0,
         client:      a.client,
         adType:      a.adType,
         postType:    a.postType,
@@ -834,6 +858,15 @@ bot.on("callback_query", async (ctx) => {
     return;
   }
 
+  // ── Bulk start number selection ───────────────────────────────────────────
+  if (data.startsWith("bsn:")) {
+    const n = parseInt(data.slice(4), 10);
+    session._bulkStartNum = isNaN(n) ? 0 : n;
+    session.step = nextStep("bulkStartNum", session);
+    await updateWizard(ctx.telegram, session);
+    return;
+  }
+
   // ── Bulk template selection ───────────────────────────────────────────────
   if (data.startsWith("blk:")) {
     const id       = data.slice(4);
@@ -939,6 +972,14 @@ bot.on("text", async (ctx) => {
       a.perPagePrices[handle].price = isNaN(n) ? input : String(n);
       a.pagePricePhase = "bulk";
       session.awaitingCustom = null;
+      await updateWizard(ctx.telegram, session);
+      return;
+    }
+    if (field === "bulkStartNum") {
+      const n = parseInt(input.replace(/[^0-9]/g, ""), 10);
+      session._bulkStartNum  = isNaN(n) ? 0 : n;
+      session.awaitingCustom = null;
+      session.step           = nextStep("bulkStartNum", session);
       await updateWizard(ctx.telegram, session);
       return;
     }
