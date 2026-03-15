@@ -130,8 +130,8 @@ function freshSession(chatId, mode = "brief") {
 // Template mode has its own step list (bulkName/bulkRefPrefix up front; no time/caption/content).
 
 const STEPS = [
-  "client", "campaignRef", "adType", "price",
-  "postType", "duration", "nif", "time",
+  "client", "adType", "price",
+  "postType", "duration", "nif", "time", "seniors",
   "pages", "format", "caption", "content", "preview",
 ];
 
@@ -680,9 +680,9 @@ async function updateWizard(telegram, session) {
   }
 }
 
-// ── /new command ──────────────────────────────────────────────────────────────
+// ── /ad command ───────────────────────────────────────────────────────────────
 
-bot.command("new", async (ctx) => {
+bot.command("ad", async (ctx) => {
   const session = freshSession(ctx.chat.id);
   const { text, keyboard } = renderMsg(session);
   const msg = await ctx.reply(text, { parse_mode: "Markdown", ...(keyboard || {}) });
@@ -700,9 +700,9 @@ bot.command("newbulk", async (ctx) => {
   sessions.set(ctx.from.id, session);
 });
 
-// ── /newcampaign — create a recurring campaign template ────────────────────────
+// ── /newcamp — create a recurring campaign template ───────────────────────────
 
-bot.command("newcampaign", async (ctx) => {
+bot.command("newcamp", async (ctx) => {
   const session = freshSession(ctx.chat.id, "campaign-template");
   const { text, keyboard } = renderMsg(session);
   const msg = await ctx.reply(text, { parse_mode: "Markdown", ...(keyboard || {}) });
@@ -710,12 +710,12 @@ bot.command("newcampaign", async (ctx) => {
   sessions.set(ctx.from.id, session);
 });
 
-// ── /continuecampaign — run an existing campaign template ─────────────────────
+// ── /camp — run an existing campaign template ─────────────────────────────────
 
-bot.command("continuecampaign", async (ctx) => {
+bot.command("camp", async (ctx) => {
   if (!KNOWN_CAMPAIGNS.length) {
     return ctx.reply(
-      "🔁 No campaign templates saved yet\\.\nUse /newcampaign to create one\\.",
+      "🔁 No campaign templates saved yet\\.\nUse /newcamp to create one\\.",
       { parse_mode: "MarkdownV2" }
     );
   }
@@ -730,9 +730,9 @@ bot.command("continuecampaign", async (ctx) => {
   sessions.set(ctx.from.id, session);
 });
 
-// ── /continuebulk — run an existing bulk template ─────────────────────────────
+// ── /bulk — run an existing bulk template ─────────────────────────────────────
 
-bot.command("continuebulk", async (ctx) => {
+bot.command("bulk", async (ctx) => {
   if (!KNOWN_BULKS.length) {
     return ctx.reply(
       "📦 No bulk templates saved yet\\.\nUse /newbulk to create one\\.",
@@ -863,7 +863,7 @@ bot.on("callback_query", async (ctx) => {
       }
       isCampaignTpl ? saveCampaigns() : saveBulks();
       sessions.delete(ctx.from.id);
-      const continueCmd = isCampaignTpl ? "/continuecampaign" : "/continuebulk";
+      const continueCmd = isCampaignTpl ? "/camp" : "/bulk";
       await ctx.telegram.editMessageText(
         session.chatId, session.wizardMsgId, undefined,
         `💾 *${isCampaignTpl ? "Campaign" : "Bulk"} template saved!*\n\n*${template.name}*\n` +
