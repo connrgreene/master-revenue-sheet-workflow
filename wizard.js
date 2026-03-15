@@ -1087,13 +1087,20 @@ bot.on("callback_query", async (ctx) => {
 
 bot.command("pipeline", async (ctx) => {
   try {
-    const msg = await ctx.reply("🔍 Pulling pipeline...", { parse_mode: "Markdown" });
+    const msg = await ctx.reply("🔍 Pulling pipeline...");
     const summary = await brain.getPipelineSummary();
-    await ctx.telegram.editMessageText(
-      ctx.chat.id, msg.message_id, undefined,
-      `📊 *Pipeline Summary*\n\n${summary}`,
-      { parse_mode: "Markdown" }
-    );
+    const text = `📊 Pipeline Summary\n\n${summary}`;
+    try {
+      await ctx.telegram.editMessageText(
+        ctx.chat.id, msg.message_id, undefined,
+        `📊 *Pipeline Summary*\n\n${summary}`,
+        { parse_mode: "Markdown" }
+      );
+    } catch (_) {
+      await ctx.telegram.editMessageText(
+        ctx.chat.id, msg.message_id, undefined, text
+      );
+    }
   } catch (err) {
     console.error("[wizard] /pipeline error:", err.message);
     await ctx.reply("Pipeline error: " + err.message);
@@ -1110,10 +1117,16 @@ bot.command("deal", async (ctx) => {
     }
     const msg = await ctx.reply(`🔍 Analyzing deal for "${clientName}"...`);
     const advice = await brain.getDealAdvice(clientName);
-    await ctx.telegram.editMessageText(
-      ctx.chat.id, msg.message_id, undefined,
-      advice, { parse_mode: "Markdown" }
-    );
+    try {
+      await ctx.telegram.editMessageText(
+        ctx.chat.id, msg.message_id, undefined,
+        advice, { parse_mode: "Markdown" }
+      );
+    } catch (_) {
+      await ctx.telegram.editMessageText(
+        ctx.chat.id, msg.message_id, undefined, advice
+      );
+    }
   } catch (err) {
     console.error("[wizard] /deal error:", err.message);
     await ctx.reply("Pipeline error: " + err.message);
