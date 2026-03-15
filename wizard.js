@@ -36,10 +36,15 @@ try { KNOWN_CLIENTS = require("./config/clients.json"); } catch (_) {}
 const BULKS_PATH = path.join(__dirname, "config", "bulks.json");
 let KNOWN_BULKS = [];
 try { KNOWN_BULKS = JSON.parse(fs.readFileSync(BULKS_PATH, "utf8")); } catch (_) {}
-
-/** Persist updated lastRefNum back to bulks.json (best-effort, ephemeral between deploys). */
 function saveBulks() {
   try { fs.writeFileSync(BULKS_PATH, JSON.stringify(KNOWN_BULKS, null, 2)); } catch (_) {}
+}
+
+const CAMPAIGNS_PATH = path.join(__dirname, "config", "campaigns.json");
+let KNOWN_CAMPAIGNS = [];
+try { KNOWN_CAMPAIGNS = JSON.parse(fs.readFileSync(CAMPAIGNS_PATH, "utf8")); } catch (_) {}
+function saveCampaigns() {
+  try { fs.writeFileSync(CAMPAIGNS_PATH, JSON.stringify(KNOWN_CAMPAIGNS, null, 2)); } catch (_) {}
 }
 
 const bot = new Telegraf(WIZARD_TOKEN);
@@ -74,10 +79,13 @@ function freshSession(chatId, mode = "brief") {
     step:           mode === "template" ? "bulkName" : "client",
     awaitingCustom: null,
 
-    // template-creation extras (mode === "template" only)
-    _bulkName:      null,
-    _bulkRefPrefix: null,
-    _bulkStartNum:  0,    // last completed run # (next run = this + 1)
+    // template-creation extras
+    _bulkName:       null,
+    _bulkRefPrefix:  null,
+    _bulkStartNum:   0,       // last completed run # (next = this + 1), bulks only
+    _skipBulkSlots:  false,   // true for campaigns — skip per-page slot # question
+    _bulkTemplateId: null,    // set when continuing a bulk template
+    _campaignTemplateId: null,// set when continuing a campaign template
 
     answers: {
       client:      null,
@@ -121,32 +129,38 @@ const STEPS = [
   "pages", "format", "caption", "content", "preview",
 ];
 
-// Template creation: skip campaignRef (replaced by bulkRefPrefix), time, caption, content.
+// Bulk template creation: bulkStartNum tracks how far through the slot package we are.
 const TEMPLATE_STEPS = [
   "bulkName", "bulkRefPrefix", "bulkStartNum", "client", "adType", "price",
   "postType", "duration", "nif", "pages", "format", "preview",
 ];
 
-function nextStep(from, session) {
-  const isTemplate = session?.mode === "template";
-  const steps      = isTemplate ? TEMPLATE_STEPS : STEPS;
+// Campaign template creation: no bulkStartNum (ref # is freeform each run, not sequential).
+const TEMPLATE_CAMPAIGN_STEPS = [
+  "bulkName", "bulkRefPrefix", "client", "adType", "price",
+  "postType", "duration", "nif", "pages", "format", "preview",
+];
 
+function _stepsFor(session) {
+  if (session?.mode === "template")          return TEMPLATE_STEPS;
+  if (session?.mode === "campaign-template") return TEMPLATE_CAMPAIGN_STEPS;
+  return STEPS;
+}
+
+function nextStep(from, session) {
+  const steps = _stepsFor(session);
   if (from === "pages"      && session?.answers?.priceMode === "per-page") return "pageprices";
   if (from === "pageprices")  return "format";
   if (from === "price"      && session?.answers?.priceMode === "per-page") return "postType";
-
   const i = steps.indexOf(from);
   return i >= 0 && i < steps.length - 1 ? steps[i + 1] : "preview";
 }
 
 function prevStep(from, session) {
-  const isTemplate = session?.mode === "template";
-  const steps      = isTemplate ? TEMPLATE_STEPS : STEPS;
-
+  const steps = _stepsFor(session);
   if (from === "pageprices") return "pages";
   if (from === "format" && session?.answers?.priceMode === "per-page") return "pageprices";
   if (from === "postType" && session?.answers?.priceMode === "per-page") return "price";
-
   const i = steps.indexOf(from);
   return i > 0 ? steps[i - 1] : steps[0];
 }
@@ -275,7 +289,7 @@ function buildKeyboard(step, session) {
         [b("← Back", "a:back")],
       ]);
     case "preview":
-      return isTemplate
+      return (isTemplate || session?.mode === "campaign-template")
         ? Markup.inlineKeyboard([
             [b("💾  Save template", "a:saveTemplate"), b("✏️  Edit", "a:edit"), b("🗑️  Cancel", "a:cancel")],
             [b("← Back", "a:back")],
@@ -338,6 +352,13 @@ function renderPagePricesStep(session) {
         [b("← Back", "a:back")],
       ]),
     };
+  }
+
+  // Campaigns skip the bulk slot # entirely — auto-advance to next page
+  if (session._skipBulkSlots && phase === "bulk") {
+    answers.pagePricePhase = "price";
+    answers.pagePriceIdx++;
+    return renderPagePricesStep(session);
   }
 
   if (phase === "bulk") {
@@ -452,8 +473,12 @@ function renderContentStep(session) {
 
 function renderMsg(session) {
   const { step, answers, awaitingCustom, mode } = session;
-  const isTemplate = mode === "template";
-  const heading    = isTemplate ? "📦 *New Bulk Template*" : "📋 *New Ad Brief*";
+  const isTemplate         = mode === "template";
+  const isCampaignTemplate = mode === "campaign-template";
+  const isAnyTemplate      = isTemplate || isCampaignTemplate;
+  const heading = isCampaignTemplate ? "🔁 *New Campaign Template*"
+                : isTemplate         ? "📦 *New Bulk Template*"
+                : "📋 *New Ad Brief*";
 
   // ── Template-specific steps ───────────────────────────────────────────────
   if (step === "bulkName") {
@@ -479,12 +504,18 @@ function renderMsg(session) {
   }
 
   if (step === "preview") {
-    if (isTemplate) {
-      const startNum = session._bulkStartNum || 0;
-      const nextNum  = startNum + 1;
-      const refLine  = session._bulkRefPrefix
-        ? `Ref: ${session._bulkRefPrefix} ${nextNum}, ${nextNum + 1}, …`
-        : `Run counter starts at #${nextNum}`;
+    if (isAnyTemplate) {
+      let refLine;
+      if (isCampaignTemplate) {
+        refLine = session._bulkRefPrefix
+          ? `Ref: ${session._bulkRefPrefix} 1, ${session._bulkRefPrefix} 2, … _(editable each run)_`
+          : "No ref prefix — you'll set the ref each run";
+      } else {
+        const nextNum = (session._bulkStartNum || 0) + 1;
+        refLine = session._bulkRefPrefix
+          ? `Ref: ${session._bulkRefPrefix} ${nextNum}, ${nextNum + 1}, …`
+          : `Run counter starts at #${nextNum}`;
+      }
       return {
         text:     `${heading}\n\n*${session._bulkName || "Unnamed"}*\n${refLine}\n\n${renderSummary(answers)}`,
         keyboard: buildKeyboard("preview", session),
@@ -642,6 +673,36 @@ bot.command("newbulk", async (ctx) => {
   sessions.set(ctx.from.id, session);
 });
 
+// ── /newcampaign — create a recurring campaign template ────────────────────────
+
+bot.command("newcampaign", async (ctx) => {
+  const session = freshSession(ctx.chat.id, "campaign-template");
+  const { text, keyboard } = renderMsg(session);
+  const msg = await ctx.reply(text, { parse_mode: "Markdown", ...(keyboard || {}) });
+  session.wizardMsgId = msg.message_id;
+  sessions.set(ctx.from.id, session);
+});
+
+// ── /continuecampaign — run an existing campaign template ─────────────────────
+
+bot.command("continuecampaign", async (ctx) => {
+  if (!KNOWN_CAMPAIGNS.length) {
+    return ctx.reply(
+      "🔁 No campaign templates saved yet\\.\nUse /newcampaign to create one\\.",
+      { parse_mode: "MarkdownV2" }
+    );
+  }
+  const keyboard = Markup.inlineKeyboard(
+    KNOWN_CAMPAIGNS.map((t) => [b(t.name, `cmp:${t.id}`)])
+  );
+  const session = freshSession(ctx.chat.id);
+  const msg = await ctx.reply("🔁 *Which campaign?*", {
+    parse_mode: "Markdown", ...keyboard,
+  });
+  session.wizardMsgId = msg.message_id;
+  sessions.set(ctx.from.id, session);
+});
+
 // ── /continuebulk — run an existing bulk template ─────────────────────────────
 
 bot.command("continuebulk", async (ctx) => {
@@ -708,13 +769,14 @@ bot.on("callback_query", async (ctx) => {
         await postToGroup(ctx.telegram, session);
         const brief = buildBrief(session.answers);
 
-        // ── Increment bulk counter (persisted in-process; resets on redeploy) ──
+        // ── Increment ref counter (persisted in-process; resets on redeploy) ──
         if (session._bulkTemplateId) {
           const bidx = KNOWN_BULKS.findIndex((t) => t.id === session._bulkTemplateId);
-          if (bidx >= 0) {
-            KNOWN_BULKS[bidx].lastRefNum = (KNOWN_BULKS[bidx].lastRefNum || 0) + 1;
-            saveBulks();
-          }
+          if (bidx >= 0) { KNOWN_BULKS[bidx].lastRefNum = (KNOWN_BULKS[bidx].lastRefNum || 0) + 1; saveBulks(); }
+        }
+        if (session._campaignTemplateId) {
+          const cidx = KNOWN_CAMPAIGNS.findIndex((t) => t.id === session._campaignTemplateId);
+          if (cidx >= 0) { KNOWN_CAMPAIGNS[cidx].lastRefNum = (KNOWN_CAMPAIGNS[cidx].lastRefNum || 0) + 1; saveCampaigns(); }
         }
 
         sessions.delete(ctx.from.id);
@@ -739,15 +801,17 @@ bot.on("callback_query", async (ctx) => {
       return;
     }
     if (action === "saveTemplate") {
-      const a   = session.answers;
-      const id  = (session._bulkName || "bulk")
+      const a            = session.answers;
+      const isCampaignTpl = session.mode === "campaign-template";
+      const id  = (session._bulkName || "template")
         .toLowerCase().replace(/\s+/g, "-").replace(/[^a-z0-9-]/g, "");
-      const existing = KNOWN_BULKS.findIndex((t) => t.id === id);
+      const store    = isCampaignTpl ? KNOWN_CAMPAIGNS : KNOWN_BULKS;
+      const existing = store.findIndex((t) => t.id === id);
       const template = {
         id,
         name:        session._bulkName || "Unnamed",
         refPrefix:   session._bulkRefPrefix || null,
-        lastRefNum:  session._bulkStartNum || 0,
+        lastRefNum:  isCampaignTpl ? 0 : (session._bulkStartNum || 0),
         client:      a.client,
         adType:      a.adType,
         postType:    a.postType,
@@ -756,21 +820,27 @@ bot.on("callback_query", async (ctx) => {
         priceMode:   a.priceMode,
         format:      a.format,
         pages:       [...a.pages],
-        perPagePrices: JSON.parse(JSON.stringify(a.perPagePrices)),
+        // Campaigns: strip bulk slot #s — only keep prices
+        perPagePrices: Object.fromEntries(
+          Object.entries(JSON.parse(JSON.stringify(a.perPagePrices))).map(([h, v]) =>
+            isCampaignTpl ? [h, { price: v.price, bulk: null }] : [h, v]
+          )
+        ),
       };
       if (existing >= 0) {
-        template.lastRefNum = KNOWN_BULKS[existing].lastRefNum || 0;
-        KNOWN_BULKS[existing] = template;
+        if (!isCampaignTpl) template.lastRefNum = store[existing].lastRefNum || 0;
+        store[existing] = template;
       } else {
-        KNOWN_BULKS.push(template);
+        store.push(template);
       }
-      saveBulks();
+      isCampaignTpl ? saveCampaigns() : saveBulks();
       sessions.delete(ctx.from.id);
+      const continueCmd = isCampaignTpl ? "/continuecampaign" : "/continuebulk";
       await ctx.telegram.editMessageText(
         session.chatId, session.wizardMsgId, undefined,
-        `💾 *Bulk template saved!*\n\n*${template.name}*\n` +
+        `💾 *${isCampaignTpl ? "Campaign" : "Bulk"} template saved!*\n\n*${template.name}*\n` +
         `${template.refPrefix ? `Ref prefix: ${template.refPrefix}\n` : ""}` +
-        `${template.pages.length} pages · Use /continuebulk to run it.`,
+        `${template.pages.length} pages · Use ${continueCmd} to run it.`,
         { parse_mode: "Markdown" }
       );
       return;
@@ -901,6 +971,45 @@ bot.on("callback_query", async (ctx) => {
 
     // Everything is pre-filled — jump straight to time selection
     session.step = "time";
+    await updateWizard(ctx.telegram, session);
+    return;
+  }
+
+  // ── Campaign template selection ───────────────────────────────────────────
+  if (data.startsWith("cmp:")) {
+    const id       = data.slice(4);
+    const template = KNOWN_CAMPAIGNS.find((t) => t.id === id);
+    if (!template) return;
+
+    const a = session.answers;
+    a.client      = template.client   || null;
+    a.adType      = template.adType   || null;
+    a.postType    = template.postType || null;
+    a.duration    = template.duration || null;
+    a.nif         = template.nif      || null;
+    a.priceMode   = template.priceMode || "same";
+    a.format      = template.format   || null;
+    a.pages       = [...(template.pages || [])];
+    a.perPagePrices = JSON.parse(JSON.stringify(template.perPagePrices || {}));
+
+    if (a.priceMode === "per-page") {
+      const total = a.pages.reduce((sum, h) => {
+        const p = parseFloat(a.perPagePrices[h]?.price || "0");
+        return sum + (isNaN(p) ? 0 : p);
+      }, 0);
+      a.price = String(total);
+    }
+
+    // Pre-fill campaignRef with suggested next # — user can edit it
+    if (template.refPrefix) {
+      a.campaignRef = `${template.refPrefix} ${(template.lastRefNum || 0) + 1}`;
+    }
+
+    session._campaignTemplateId = id;
+    session._skipBulkSlots      = true; // campaigns never ask for slot #s
+
+    // Land on campaignRef so the ref # can be freely confirmed or changed
+    session.step = "campaignRef";
     await updateWizard(ctx.telegram, session);
     return;
   }

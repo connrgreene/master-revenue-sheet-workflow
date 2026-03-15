@@ -1,0 +1,17 @@
+[
+  {
+    "id": "stake-bounty-posts",
+    "name": "Stake Bounty Posts",
+    "refPrefix": "Bounty Post #",
+    "lastRefNum": 0,
+    "client": "Stake",
+    "adType": "Affiliate",
+    "postType": "Reels",
+    "duration": "Permanent",
+    "nif": "none",
+    "priceMode": "per-page",
+    "format": "Standard",
+    "pages": [],
+    "perPagePrices": {}
+  }
+]
