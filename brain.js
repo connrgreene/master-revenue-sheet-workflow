@@ -474,7 +474,7 @@ Write the morning recap.`,
 
     const recap = msg.content[0]?.text?.trim();
     if (recap) {
-      await userClient.sendRecap(`🌅 *Good morning — Daily Sales Recap*\n_${today}_\n\n${recap}`);
+      await userClient.sendRecap(`🌅 GOOD MORNING — Daily Sales Recap\n${today}\n\n${recap}`);
       console.log("[brain] 📬 Morning recap sent");
     }
   } catch (e) {
